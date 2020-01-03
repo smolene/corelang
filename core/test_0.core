@@ -1,0 +1,10 @@
+
+/*
+main = let def = 3 in func (\x. add 10 x) def
+*/
+
+id x = x;
+fst x y = x;
+snd x y = y;
+and_then f g x = ((f) ( name ));
+twice f = and_then f f;

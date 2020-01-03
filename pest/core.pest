@@ -1,0 +1,48 @@
+COMMENT = _{ "/*" ~ (!"*/" ~ ANY)* ~ "*/" }
+WHITESPACE = _{ " " | "\t" | "\r" | "\n" }
+
+program = { SOI ~ sc+ ~ EOI }
+sc = { vars ~ "=" ~ expr ~ ";" }
+
+expr = {
+    //again ~ aexpr |
+    bexpr
+}
+
+again = { bexpr+ }
+
+bexpr = _{
+    lete |
+    letrec |
+    case |
+    lambda |
+    aexpr
+}
+
+lete = { "let" ~ defns ~ "in" ~ expr }
+letrec = { "letrec" ~ defns ~ "in" ~ expr }
+case = { "case" ~ expr ~ "of" ~ alts }
+lambda = { "\\" ~ vars ~ "." ~ expr }
+
+aexpr = {
+    var |
+    num |
+    cname |
+    "(" ~ expr ~ ")"
+}
+
+defns = { defn+ }
+defn = { var ~ "=" ~ expr }
+
+alts = { alt+ }
+alt = { cname ~ maybe_vars ~ "->" ~ expr }
+
+maybe_vars = { vars? }
+vars = { var+ }
+var = @{ svar ~ vchar* }
+svar = _{ ASCII_ALPHA | ":" }
+vchar = _{ ASCII_ALPHA_LOWER | ASCII_DIGIT | "_" }
+
+num = @{ ASCII_DIGIT+ }
+
+cname = @{ ASCII_ALPHA_UPPER ~ vchar* }
