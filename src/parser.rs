@@ -15,6 +15,7 @@ pub struct Definitions {
 pub fn parse_core_str<'s>(s: &'s str, interner: &mut DefaultStringInterner) -> Result<Definitions, Error<'s>> {
     use pest::Parser;
     let mut core = CoreParser::parse(Rule::program, s).map_err(|e| Error::Pest(e))?;
+    //println!("{:#?}", &core);
     let mut defs = Vec::with_capacity(core.size_hint().0);
     for sc in core.next().unwrap().into_inner() {
         if sc.as_rule() == Rule::sc {
@@ -27,25 +28,19 @@ pub fn parse_core_str<'s>(s: &'s str, interner: &mut DefaultStringInterner) -> R
 fn parse_expr<'s>(pair: Pair<'s, Rule>, inter: &mut DefaultStringInterner) -> Result<CExpr, Error<'s>> {
     //println!("{:#?}", &pair);
     match pair.as_rule() {
-        Rule::expr => {
+        Rule::fexpr => {
             let mut iter = pair.into_inner();
-            let first = iter.next().unwrap();
-            match first.as_rule() {
-                Rule::again => {
-                    let again = first.into_inner().try_fold(None, |acc, p| {
-                        match acc {
-                            None => Ok(Some(parse_expr(p, inter)?)),
-                            Some(left) => Ok(Some(CExpr::App(Box::new(left), Box::new(parse_expr(p, inter)?)))),
-                        }
-                    })?.unwrap();
-                    let aexpr = iter.next().unwrap();
-                    Ok(CExpr::App(Box::new(again), Box::new(parse_expr(aexpr, inter)?)))
-                },
-                Rule::bexpr => parse_expr(first, inter),
-                _other => Err(Error::Pair(first, "parse first in parse_expr failed".to_string()))
-            }
+            let res = iter.try_fold(None, |acc, p| {
+                match acc {
+                    None => Ok(Some(parse_expr(p, inter)?)),
+                    Some(left) => Ok(Some(CExpr::App(Box::new(left), Box::new(parse_expr(p, inter)?)))),
+                }
+            })?.unwrap();
+            Ok(res)
         },
-        Rule::bexpr => parse_expr(pair.into_inner().next().unwrap(), inter),
+        Rule::expr => parse_expr(pair.into_inner().next().unwrap(), inter),
+        Rule::cexpr => parse_expr(pair.into_inner().next().unwrap(), inter),
+        Rule::obj => parse_expr(pair.into_inner().next().unwrap(), inter),
         Rule::lete | Rule::letrec => {
             let rec = pair.as_rule() == Rule::letrec;
             let mut iter = pair.into_inner();
@@ -86,7 +81,7 @@ fn parse_expr<'s>(pair: Pair<'s, Rule>, inter: &mut DefaultStringInterner) -> Re
         },
         Rule::lambda => {
             let mut iter = pair.into_inner();
-            let vars = parse_vars(iter.next().unwrap(), inter)?;
+            let vars = parse_maybe_vars(iter.next().unwrap(), inter)?;
             let expr = parse_expr(iter.next().unwrap(), inter)?;
             Ok(CExpr::Lambda(vars, Box::new(expr)))
         },
@@ -114,7 +109,10 @@ fn parse_maybe_vars<'s>(pair: Pair<'s, Rule>, inter: &mut DefaultStringInterner)
 fn parse_vars<'s>(pair: Pair<'s, Rule>, inter: &mut DefaultStringInterner) -> Result<Vec<Sym>, Error<'s>> {
     match pair.as_rule() {
         Rule::vars => {
-            Ok(pair.into_inner().map(|p| inter.get_or_intern(p.as_str())).collect::<Vec<_>>())
+            Ok(pair.into_inner().map(|p| {
+                println!("[{}]", p.as_str());
+                inter.get_or_intern(p.as_str())
+            }).collect::<Vec<_>>())
         }
         _other => Err(Error::Pair(pair, "parse_vars failed".to_string())),
     }
@@ -124,9 +122,11 @@ fn parse_sc<'s>(pair: Pair<'s, Rule>, inter: &mut DefaultStringInterner) -> Resu
     match pair.as_rule() {
         Rule::sc => {
             let mut iter = pair.into_inner();
-            let mut vars = iter.next().unwrap().into_inner();
-            let name = inter.get_or_intern(vars.next().unwrap().as_str());
-            let params = vars.map(|p| inter.get_or_intern(p.as_str())).collect::<Vec<_>>();
+            let name_str = iter.next().unwrap().as_str();
+            println!("({})", name_str);
+            let name = inter.get_or_intern(name_str);
+            let vars = iter.next().unwrap();
+            let params = parse_maybe_vars(vars, inter)?;
             let expr = parse_expr(iter.next().unwrap(), inter)?;
             Ok(CSc::new(name, params, expr))
         },

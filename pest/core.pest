@@ -3,7 +3,7 @@ WHITESPACE = _{ " " | "\t" | "\r" | "\n" }
 
 program = { SOI ~ sc+ ~ EOI }
 
-sc = { vars ~ "=" ~ expr ~ ";" }
+sc = { var ~ maybe_vars ~ "=" ~ expr ~ ";" }
 /*
 expr = {
     "(" ~ (
@@ -20,29 +20,33 @@ aexpr = { "." }
 again = { "." }
 */
 
-expr = {
-    bexpr+
-}
+kword = _{ "let" | "letrec" | "in" | "case" | "of" | "\\" | "." | "->" }
 
-bexpr = {
-    !"let" ~ !"case" ~ !"letrec" ~ !"in" ~ !"of" ~ !"\\" ~ (
-        var |
-        num |
-        cname |
-        "(" ~ (
-            lete |
-            letrec |
-            case |
-            lambda |
-            expr
-        ) ~ ")"
+expr = { cexpr | fexpr }
+cexpr = { "(" ~ expr ~ ")" }
+fexpr = { obj+ }
+dollar = _{ "$" ~ expr }
+
+obj = {
+    dollar |
+    lete |
+    letrec |
+    case |
+    lambda |
+    (
+    !kword ~ (
+    var |
+    num |
+    cname |
+    cexpr
+    )
     )
 }
 
 lete = { "let" ~ defns ~ "in" ~ expr }
 letrec = { "letrec" ~ defns ~ "in" ~ expr }
 case = { "case" ~ expr ~ "of" ~ alts }
-lambda = { "\\" ~ vars ~ "." ~ expr }
+lambda = { "\\" ~ maybe_vars ~ "." ~ expr }
 
 defns = { defn+ }
 defn = { var ~ "=" ~ expr }
