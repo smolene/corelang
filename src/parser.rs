@@ -9,21 +9,23 @@ struct CoreParser;
 
 #[derive(Debug, Clone)]
 pub struct Definitions {
-    scs: Vec<CExpr>,
+    pub scs: Vec<CSc>,
 }
 
 pub fn parse_core_str<'s>(s: &'s str, interner: &mut DefaultStringInterner) -> Result<Definitions, Error<'s>> {
     use pest::Parser;
-    let core = CoreParser::parse(Rule::program, s).map_err(|e| Error::Pest(e))?;
+    let mut core = CoreParser::parse(Rule::program, s).map_err(|e| Error::Pest(e))?;
     let mut defs = Vec::with_capacity(core.size_hint().0);
-    for sc in core {
-        defs.push(parse_expr(sc, interner)?);
+    for sc in core.next().unwrap().into_inner() {
+        if sc.as_rule() == Rule::sc {
+            defs.push(parse_sc(sc, interner)?);
+        }
     }
     Ok(Definitions { scs: defs })
 }
 
 fn parse_expr<'s>(pair: Pair<'s, Rule>, inter: &mut DefaultStringInterner) -> Result<CExpr, Error<'s>> {
-    println!("{:#?}", &pair);
+    //println!("{:#?}", &pair);
     match pair.as_rule() {
         Rule::expr => {
             let mut iter = pair.into_inner();
@@ -40,11 +42,10 @@ fn parse_expr<'s>(pair: Pair<'s, Rule>, inter: &mut DefaultStringInterner) -> Re
                     Ok(CExpr::App(Box::new(again), Box::new(parse_expr(aexpr, inter)?)))
                 },
                 Rule::bexpr => parse_expr(first, inter),
-                _other => Err(Error::Pair(first))
+                _other => Err(Error::Pair(first, "parse first in parse_expr failed".to_string()))
             }
         },
         Rule::bexpr => parse_expr(pair.into_inner().next().unwrap(), inter),
-        Rule::aexpr => parse_expr(pair.into_inner().next().unwrap(), inter),
         Rule::lete | Rule::letrec => {
             let rec = pair.as_rule() == Rule::letrec;
             let mut iter = pair.into_inner();
@@ -95,7 +96,7 @@ fn parse_expr<'s>(pair: Pair<'s, Rule>, inter: &mut DefaultStringInterner) -> Re
         },
         Rule::cname => Ok(CExpr::Constructor(inter.get_or_intern(pair.as_str()))),
         Rule::var => Ok(CExpr::Var(inter.get_or_intern(pair.as_str()))),
-        _other => Err(Error::Pair(pair)),
+        _other => Err(Error::Pair(pair, "parse_expr failed".to_string())),
     }
 }
 
@@ -106,7 +107,7 @@ fn parse_maybe_vars<'s>(pair: Pair<'s, Rule>, inter: &mut DefaultStringInterner)
             None => Ok(vec![]),
         }
         Rule::vars => parse_vars(pair, inter),
-        _other => Err(Error::Pair(pair)),
+        _other => Err(Error::Pair(pair, "parse_maybe_vars failed".to_string())),
     }
 }
 
@@ -115,7 +116,7 @@ fn parse_vars<'s>(pair: Pair<'s, Rule>, inter: &mut DefaultStringInterner) -> Re
         Rule::vars => {
             Ok(pair.into_inner().map(|p| inter.get_or_intern(p.as_str())).collect::<Vec<_>>())
         }
-        _other => Err(Error::Pair(pair)),
+        _other => Err(Error::Pair(pair, "parse_vars failed".to_string())),
     }
 }
 
@@ -129,13 +130,13 @@ fn parse_sc<'s>(pair: Pair<'s, Rule>, inter: &mut DefaultStringInterner) -> Resu
             let expr = parse_expr(iter.next().unwrap(), inter)?;
             Ok(CSc::new(name, params, expr))
         },
-        _other => Err(Error::Pair(pair)),
+        _other => Err(Error::Pair(pair, "parse_sc failed".to_string())),
     }
 }
 
 #[derive(Clone, Debug)]
 pub enum Error<'s> {
-    Pair(Pair<'s, Rule>),
+    Pair(Pair<'s, Rule>, String),
     Pest(pest::error::Error<Rule>),
     ParseInt(ParseIntError),
 }
