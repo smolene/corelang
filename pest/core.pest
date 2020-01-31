@@ -1,26 +1,12 @@
 COMMENT = _{ "/*" ~ (!"*/" ~ ANY)* ~ "*/" }
 WHITESPACE = _{ " " | "\t" | "\r" | "\n" }
 
-program = { SOI ~ sc+ ~ EOI }
+program = { SOI ~ (cons | sc)+ ~ EOI }
 
+cons = { "data" ~ cname ~ maybe_vars ~ ";" }
 sc = { var ~ maybe_vars ~ "=" ~ expr ~ ";" }
-/*
-expr = {
-    "(" ~ (
-        lete |
-        letrec |
-        case |
-        lambda ) ~ ")" |
-    var |
-    num |
-    cname
-}
 
-aexpr = { "." }
-again = { "." }
-*/
-
-kword = _{ "let" | "letrec" | "in" | "case" | "of" | "\\" | "." | "->" }
+kword = _{ "let" | "letrec" | "in" | "case" | "of" | "\\" | "." | "->" | "," }
 
 expr = { cexpr | fexpr }
 cexpr = { "(" ~ expr ~ ")" }
@@ -32,14 +18,13 @@ obj = {
     lete |
     letrec |
     case |
-    lambda |
-    (
-    !kword ~ (
-    var |
-    num |
-    cname |
-    cexpr
-    )
+    lambda | (
+        !kword ~ (
+            var |
+            num |
+            cname |
+            cexpr
+        )
     )
 }
 
@@ -51,7 +36,7 @@ lambda = { "\\" ~ maybe_vars ~ "." ~ expr }
 defns = { defn+ }
 defn = { var ~ "=" ~ expr }
 
-alts = { alt+ }
+alts = { alt ~ ("," ~ alt)* ~ ","? }
 alt = { cname ~ maybe_vars ~ "->" ~ expr }
 
 maybe_vars = { vars? }

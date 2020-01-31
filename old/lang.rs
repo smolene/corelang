@@ -1,12 +1,14 @@
 use string_interner::{Sym, Symbol, StringInterner};
-use std::fmt::Write;
+use std::fmt::{Write, Error};
 
 pub type Int = i64;
 
 pub type CExpr = Expr<Sym, Sym>;
 pub type CSc = Sc<Sym, Sym>;
+pub type CData = Data<Sym, Sym>;
+pub type CAlter = Alter<Sym, Sym>;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Sc<N, M> {
     name: N,
     params: Vec<N>,
@@ -29,11 +31,12 @@ impl<S: Symbol + Clone> PrettyPrint for Sc<S, S> {
         }
         write!(buf, "= ", )?;
         self.expr.pretty_print(buf, inter)?;
+        write!(buf, ";")?;
         Ok(())
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Expr<N, M> {
     Var(N),
     Num(Int),
@@ -71,7 +74,7 @@ impl<S: Symbol + Clone> PrettyPrint for Expr<S, S> {
                     write!(buf, "let")?;
                 }
                 for (n, e) in defs.iter() {
-                    write!(buf, " {} -> ", inter.resolve(n.clone()).unwrap())?;
+                    write!(buf, " {} = ", inter.resolve(n.clone()).unwrap())?;
                     e.pretty_print(buf, inter)?;
                 }
                 write!(buf, " in ")?;
@@ -81,13 +84,10 @@ impl<S: Symbol + Clone> PrettyPrint for Expr<S, S> {
                 write!(buf, "case ")?;
                 e.pretty_print(buf, inter)?;
                 write!(buf, " of")?;
-                for Alter { cons, vars, expr } in v {
-                    write!(buf, " {} ", inter.resolve(cons.clone()).unwrap())?;
-                    for v in vars {
-                        write!(buf, "{} ", inter.resolve(v.clone()).unwrap())?;
-                    }
-                    write!(buf, "-> ")?;
-                    expr.pretty_print(buf, inter)?;
+                for alter in v {
+                    write!(buf, " ")?;
+                    alter.pretty_print(buf, inter)?;
+                    write!(buf, ",")?;
                 }
             },
             Lambda(vars, e) => {
@@ -107,16 +107,49 @@ impl<S: Symbol + Clone> PrettyPrint for Expr<S, S> {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Alter<N, M> {
-    cons: M,
-    vars: Vec<N>,
+    data: Data<N, M>,
     expr: Expr<N, M>,
 }
 
 impl<N, M> Alter<N, M> {
-    pub fn new(cons: M, vars: Vec<N>, expr: Expr<N, M>) -> Self {
-        Self { cons, vars, expr }
+    pub fn new(data: Data<N, M>, expr: Expr<N, M>) -> Self {
+        Self { data, expr }
+    }
+}
+
+impl<S: Symbol + Clone> PrettyPrint for Alter<S, S> {
+    type Symbol = S;
+
+    fn pretty_print(&self, buf: &mut impl Write, inter: &StringInterner<Self::Symbol>) -> Result<(), Error> {
+        self.data.pretty_print(buf, inter)?;
+        write!(buf, " -> ")?;
+        self.expr.pretty_print(buf, inter)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Data<N, M> {
+    name: M,
+    vars: Vec<N>,
+}
+
+impl<N, M> Data<N, M> {
+    pub fn new(name: M, vars: Vec<N>) -> Self {
+        Self { name, vars }
+    }
+}
+
+impl<S: Symbol + Clone> PrettyPrint for Data<S, S> {
+    type Symbol = S;
+
+    fn pretty_print(&self, buf: &mut impl Write, inter: &StringInterner<Self::Symbol>) -> Result<(), Error> {
+        write!(buf, "{}", inter.resolve(self.name.clone()).unwrap())?;
+        for v in self.vars.iter() {
+            write!(buf, " {}", inter.resolve(v.clone()).unwrap())?;
+        }
+        Ok(())
     }
 }
 

@@ -1,5 +1,6 @@
 
-main = let def = 3 in func (\x. add 10 x) def;
+test = \a. (add 10) a;
+main = let def = 3 in (func (\x. (add 10) x)) def;
 
 id abcd = x;
 fst x y = x;
@@ -9,7 +10,7 @@ jdg x = add 3 4;
 lol a b c = (let kk = (3) in x);
 
 cae d c d = case 3 of
-    Cons a l -> (4)
+    Cons a l -> 4,
     Lol k j -> 5;
 
 lbd a l = \x. 3;
@@ -19,4 +20,3 @@ and_then f g x = f g $ let d = 4 in 5;
 twice f = and_then f f;
 
 zero = \n.3;
-

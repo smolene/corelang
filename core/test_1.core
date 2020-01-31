@@ -1,0 +1,15 @@
+
+data Nil;
+data Cons a b;
+
+map ls f = case ls of
+    Nil -> Nil,
+    Cons x xs -> Cons (f x) (map xs f);
+
+foldl f acc ls = case ls of
+    Nil -> acc,
+    Cons x xs -> foldl f (f acc x) xs;
+
+foldr f acc ls = case ls of
+    Nil -> acc,
+    Cons x xs -> f x (foldr f acc xs);

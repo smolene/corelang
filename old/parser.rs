@@ -1,7 +1,8 @@
 use pest::iterators::Pair;
-use crate::lang::{CExpr, CSc, Alter, Int};
+use crate::lang::{CExpr, CSc, CAlter, Int, CData};
 use string_interner::{DefaultStringInterner, Sym};
 use std::num::ParseIntError;
+use std::fmt::{Display, Formatter};
 
 #[derive(Parser)]
 #[grammar = "../pest/core.pest"]
@@ -10,19 +11,33 @@ struct CoreParser;
 #[derive(Debug, Clone)]
 pub struct Definitions {
     pub scs: Vec<CSc>,
+    pub cons: Vec<CData>,
+}
+
+impl PartialEq for Definitions {
+    fn eq(&self, other: &Self) -> bool {
+        self.scs.len() == other.scs.len()
+            && self.cons.len() == other.cons.len()
+            && self.scs.iter().all(|x| other.scs.contains(x))
+            && self.cons.iter().all(|x| other.cons.contains(x))
+    }
 }
 
 pub fn parse_core_str<'s>(s: &'s str, interner: &mut DefaultStringInterner) -> Result<Definitions, Error<'s>> {
     use pest::Parser;
     let mut core = CoreParser::parse(Rule::program, s).map_err(|e| Error::Pest(e))?;
     //println!("{:#?}", &core);
-    let mut defs = Vec::with_capacity(core.size_hint().0);
+    let mut defs = vec![];
+    let mut cons= vec![];
     for sc in core.next().unwrap().into_inner() {
-        if sc.as_rule() == Rule::sc {
-            defs.push(parse_sc(sc, interner)?);
+        match sc.as_rule() {
+            Rule::sc => defs.push(parse_sc(sc, interner)?),
+            Rule::cons => cons.push(parse_data(sc, interner)?),
+            Rule::EOI => (),
+            _other => return Err(Error::Pair(sc, "parse_core_str".to_string())),
         }
     }
-    Ok(Definitions { scs: defs })
+    Ok(Definitions { scs: defs, cons })
 }
 
 fn parse_expr<'s>(pair: Pair<'s, Rule>, inter: &mut DefaultStringInterner) -> Result<CExpr, Error<'s>> {
@@ -75,7 +90,7 @@ fn parse_expr<'s>(pair: Pair<'s, Rule>, inter: &mut DefaultStringInterner) -> Re
                 let cname = inter.get_or_intern(iter.next().unwrap().as_str());
                 let vars = parse_maybe_vars(iter.next().unwrap(), inter)?;
                 let expr = parse_expr(iter.next().unwrap(), inter)?;
-                alts.push(Alter::new(cname, vars, expr))
+                alts.push(CAlter::new(CData::new(cname, vars), expr))
             }
             Ok(CExpr::Case(Box::new(expr), alts))
         },
@@ -110,7 +125,7 @@ fn parse_vars<'s>(pair: Pair<'s, Rule>, inter: &mut DefaultStringInterner) -> Re
     match pair.as_rule() {
         Rule::vars => {
             Ok(pair.into_inner().map(|p| {
-                println!("[{}]", p.as_str());
+                //println!("[{}]", p.as_str());
                 inter.get_or_intern(p.as_str())
             }).collect::<Vec<_>>())
         }
@@ -123,7 +138,7 @@ fn parse_sc<'s>(pair: Pair<'s, Rule>, inter: &mut DefaultStringInterner) -> Resu
         Rule::sc => {
             let mut iter = pair.into_inner();
             let name_str = iter.next().unwrap().as_str();
-            println!("({})", name_str);
+            //println!("({})", name_str);
             let name = inter.get_or_intern(name_str);
             let vars = iter.next().unwrap();
             let params = parse_maybe_vars(vars, inter)?;
@@ -134,9 +149,25 @@ fn parse_sc<'s>(pair: Pair<'s, Rule>, inter: &mut DefaultStringInterner) -> Resu
     }
 }
 
+fn parse_data<'s>(pair: Pair<'s, Rule>, inter: &mut DefaultStringInterner) -> Result<CData, Error<'s>> {
+    let mut iter = pair.into_inner();
+    let cname = inter.get_or_intern(iter.next().unwrap().as_str());
+    let vars = parse_maybe_vars(iter.next().unwrap(), inter)?;
+    Ok(CData::new(cname, vars))
+}
+
 #[derive(Clone, Debug)]
 pub enum Error<'s> {
     Pair(Pair<'s, Rule>, String),
     Pest(pest::error::Error<Rule>),
     ParseInt(ParseIntError),
+}
+
+impl Display for Error<'_> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Error::Pair(_, _) | Error::ParseInt(_) => write!(f, "{:?}", self),
+            Error::Pest(p) => write!(f, "{}", p),
+        }
+    }
 }
