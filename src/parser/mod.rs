@@ -181,7 +181,7 @@ impl Expr<Sym> {
                         write!(f, "{} ", inter.resolve(*s).unwrap())?;
                     }
                     write!(f, "-> ")?;
-                    e.pretty_print(f, inter, idt + 2)?;
+                    e.pretty_print(f, inter, idt + 1)?;
                 }
             },
             Expr::Lambda(v, e) => {

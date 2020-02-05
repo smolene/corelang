@@ -14,7 +14,11 @@ gast a b c = case a b of
         in c d k l,
     | B m n -> case n m of
         | C a b c -> 0,
-        | D e f g -> 1;
+        | D e f g -> 1,
+    | K l a -> let
+        a = c v 65,
+        l = op qr st
+        in a l l a;
 
 jdg x = add 3 4;
 
