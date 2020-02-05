@@ -1,22 +1,46 @@
+alpha x = x (y z);
+beta x = (x y) z;
 
-test = \a. (add 10) a;
-main = let def = 3 in (func (\x. (add 10) x)) def;
+id abcd = xyz def;
 
-id abcd = x;
+cae d c d = case (3) of
+    | Cons a l -> 4,
+    | Lol k j -> 5;
+
+gast a b c = case a b of
+    | A k l -> let
+        c = e 56,
+        d = f 67
+        in c d k l,
+    | B m n -> case n m of
+        | C a b c -> 0,
+        | D e f g -> 1;
+
+jdg x = add 3 4;
+
 fst x y = x;
 snd x y = y;
-jdg x = add 3 4;
+
+lettest x y = let a = x y, b = x y in a b;
+
+and_then f g x = f g (let d = 4 in 5);
+
+test = (\a. add 10) a;
+main = let def = 3 in func (\x. add 10 x) def;
 
 lol a b c = (let kk = (3) in x);
 
-cae d c d = case 3 of
-    Cons a l -> 4,
-    Lol k j -> 5;
-
-lbd a l = \x. 3;
-
-and_then f g x = f g $ let d = 4 in 5;
+lbd a l = (\x. 3);
 
 twice f = and_then f f;
 
 zero = \n.3;
+
+nested f x = let
+    a = f f x,
+    b = let
+        c = g h,
+        d = i j k,
+        e = f r t h
+        in c d e
+    in a b f x;
