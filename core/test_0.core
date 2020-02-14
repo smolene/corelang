@@ -1,3 +1,8 @@
+
+data Nil;
+data Cons x xs;
+data Lol;
+
 alpha x = x (y z);
 beta x = (x y) z;
 

@@ -1,8 +1,10 @@
-#![allow(unused)]
+#![allow(dead_code)]
 
 use string_interner::{Sym, DefaultStringInterner};
 use std::fmt::{Write, Debug};
 use std::fmt;
+use crate::parser::inner::whole_program;
+use nom::error::VerboseError;
 
 type BExpr<N> = Box<Expr<N>>;
 pub type CExpr = Expr<Name>;
@@ -11,12 +13,28 @@ pub type Alter<N> = (N, Vec<N>, Expr<N>);
 pub type CProgram = Program<Name>;
 pub type CScDef = ScDef<Name>;
 
+pub fn parse_core_program(s: &str) -> Program<&'_ str> {
+
+    fn convert(e: nom::Err<VerboseError<&str>>) -> VerboseError<&str> {
+        match e {
+            nom::Err::Incomplete(_) => unimplemented!(),
+            nom::Err::Error(e) => e,
+            nom::Err::Failure(e) => e,
+        }
+    }
+
+    match whole_program(s) {
+        Err(e) => panic!("{}", nom::error::convert_error(&s, convert(e))),
+        Ok((_s, p)) => p,
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
-pub struct Program<N>(Vec<ScDef<N>>);
+pub struct Program<N>(pub Vec<ScDef<N>>, pub Vec<Constructor<N>>);
 
 impl<N> Program<N> {
-    pub fn map<M>(&self, mut f: &mut impl FnMut(&N) -> M) -> Program<M> {
-        Program(self.0.iter().map(|sc| sc.map(f)).collect())
+    pub fn map<M>(&self, f: &mut impl FnMut(&N) -> M) -> Program<M> {
+        Program(self.0.iter().map(|sc| sc.map(f)).collect(), self.1.iter().map(|cons| cons.map(f)).collect())
     }
 
     pub fn check_eq(&self, other: &Program<N>)
@@ -24,7 +42,11 @@ impl<N> Program<N> {
         for (r, s) in self.0.iter().zip(other.0.iter()) {
             assert_eq!(r, s);
         }
-        assert_eq!(self.0.len(), other.0.len())
+        for (r, s) in self.1.iter().zip(other.1.iter()) {
+            assert_eq!(r, s);
+        }
+        assert_eq!(self.0.len(), other.0.len());
+        assert_eq!(self.1.len(), other.1.len());
     }
 }
 
@@ -43,16 +65,39 @@ impl Program<Sym> {
     }
 
     pub fn pretty_print(&self, f: &mut impl Write, inter: &DefaultStringInterner) -> fmt::Result {
+        for c in &self.1 {
+            c.pretty_print(f, inter)?;
+            write!(f, "\n\n")?;
+        }
         for s in &self.0 {
             s.pretty_print(f, inter)?;
-            write!(f, "\n\n");
+            write!(f, "\n\n")?;
         }
         Ok(())
     }
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct ScDef<N>(N, Vec<N>, Expr<N>);
+pub struct Constructor<N>(N, usize);
+
+impl<N> Constructor<N> {
+    pub fn map<M>(&self, f: &mut impl FnMut(&N) -> M) -> Constructor<M> {
+        Constructor(f(&self.0), self.1)
+    }
+}
+
+impl Constructor<Sym> {
+    pub fn pretty_print(&self, f: &mut impl Write, inter: &DefaultStringInterner) -> fmt::Result {
+        write!(f, "data {}", inter.resolve(self.0).unwrap())?;
+        for _ in 0..self.1 {
+            write!(f, " x")?;
+        }
+        write!(f, ";")
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ScDef<N>(pub N, pub Vec<N>, pub Expr<N>);
 
 impl<N> ScDef<N> {
     pub fn map<M>(&self, mut f: &mut impl FnMut(&N) -> M) -> ScDef<M> {
@@ -78,7 +123,6 @@ impl ScDef<Sym> {
 pub enum Expr<N> {
     Var(N),
     Num(i64),
-    Constructor(N, usize),
     App(BExpr<N>, BExpr<N>),
     Let(bool, Vec<(N, Expr<N>)>, BExpr<N>),
     Case(BExpr<N>, Vec<Alter<N>>),
@@ -92,7 +136,6 @@ impl<N> Expr<N> {
         match self {
             Expr::Var(s) => Expr::Var(f(s)),
             Expr::Num(x) => Expr::Num(*x),
-            Expr::Constructor(s, x) => Expr::Constructor(f(s), *x),
             Expr::App(l, r) => Expr::App(Box::new(l.map(f)), Box::new(r.map(f))),
             Expr::Let(rec, defs, e) => Expr::Let(*rec, defs.iter().map(|(s, e)| (f(s), e.map(f))).collect(), Box::new(e.map(f))),
             Expr::Case(e, alter) => Expr::Case(Box::new(e.map(f)), alter.iter().map(|(s, vs, es)| (f(s), vs.iter().map(&mut f).collect(), es.map(f))).collect()),
@@ -127,7 +170,6 @@ impl Expr<Sym> {
         match self {
             Expr::Var(s) => write!(f, "{}", inter.resolve(*s).unwrap())?,
             Expr::Num(x) => write!(f, "{}", x)?,
-            Expr::Constructor(s, n) => write!(f, "{}{{{}}}", inter.resolve(*s).unwrap(), n)?,
             Expr::App(l, r) => {
                 if l.is_atomic_app() {
                     l.pretty_print(f, inter, idt)?;
@@ -151,7 +193,6 @@ impl Expr<Sym> {
                 } else {
                     write!(f, "let ")?;
                 }
-                let n = defs.len();
                 for (i, (s, d)) in defs.iter().enumerate() {
                     if i != 0 {
                         write!(f, ",")?;
@@ -159,7 +200,7 @@ impl Expr<Sym> {
                     write!(f, "\n")?;
                     indent(f, idt + 1)?;
                     write!(f, "{} = ", inter.resolve(*s).unwrap())?;
-                    d.pretty_print(f, inter, idt + 1);
+                    d.pretty_print(f, inter, idt + 1)?;
                 }
                 write!(f, " \n")?;
                 indent(f, idt + 1)?;
@@ -206,7 +247,7 @@ pub mod inner {
     use nom::IResult;
     use nom::character::complete::{alpha1, multispace0, multispace1, digit1, space1};
     use string_interner::{DefaultStringInterner, Sym};
-    use crate::parser::{ScDef, Expr, Program};
+    use crate::parser::{ScDef, Expr, Program, Constructor};
     use nom::multi::{separated_list, many0, separated_nonempty_list, many1};
     use nom::bytes::complete::{tag, take_while};
     use nom::combinator::{map, not, complete, all_consuming, peek, verify, cut};
@@ -243,9 +284,26 @@ pub mod inner {
     pub fn program(s: &str) -> IResult<&str, Program<&str>, VerboseError<&str>> {
         context("program", |s| {
             let (s, _) = multispace0(s)?;
-            let (s, sc) = map(separated_nonempty_list(multispace0, supercombinator), |s| Program(s))(s)?;
+            let (s, cons) = context("cons", many0(preceded(multispace0, constructor)))(s)?;
             let (s, _) = multispace0(s)?;
-            Ok((s, sc))
+            let (s, sc) = context("scdef", many1(preceded(multispace0, supercombinator)))(s)?;
+            let (s, _) = multispace0(s)?;
+            Ok((s, Program(sc, cons)))
+        })(s)
+    }
+
+    fn constructor(s: &str) -> IResult<&str, Constructor<&str>, VerboseError<&str>> {
+        context("constructor", |s| {
+            let (s, _) = tag("data")(s)?;
+            let (s, _) = multispace1(s)?;
+            //dbg!(s);
+            cut(|s| {
+                let (s, xs) = context("constructor_args", separated_nonempty_list(multispace1, name))(s)?;
+                //dbg!(s);
+                let (s, _) = preceded(multispace0, tag(";"))(s)?;
+                //dbg!(s);
+                Ok((s, Constructor(*xs.first().unwrap(), xs.len() - 1)))
+            })(s)
         })(s)
     }
 
@@ -278,7 +336,6 @@ pub mod inner {
 
     fn atomic_expr(s: &str) -> IResult<&str, Expr<&str>, VerboseError<&str>> {
         context("atomic_expr", alt((
-            constructor,
             var,
             num,
             paren
@@ -291,17 +348,6 @@ pub mod inner {
 
     fn num(s: &str) -> IResult<&str, Expr<&str>, VerboseError<&str>> {
         context("num", map(digit1, |n: &str| {/*dbg!(&n);*/ Expr::Num(n.parse::<i64>().unwrap())}))(s)
-    }
-
-    fn constructor(s: &str) -> IResult<&str, Expr<&str>, VerboseError<&str>> {
-        context("constructor", |s| {
-            let (s, _) = tag("data")(s)?;
-            let (s, _) = multispace1(s)?;
-            cut(|s| {
-                let (s, xs) = separated_nonempty_list(multispace1, name)(s)?;
-                Ok((s, Expr::Constructor(*xs.first().unwrap(), xs.len() - 1)))
-            })(s)
-        })(s)
     }
 
     fn paren(s: &str) -> IResult<&str, Expr<&str>, VerboseError<&str>> {

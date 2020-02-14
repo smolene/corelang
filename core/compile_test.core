@@ -1,0 +1,6 @@
+
+id x = x;
+true x y = x;
+false x y = y;
+comp f g x = f (g x);
+twice f x = f (f x);

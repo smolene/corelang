@@ -1,0 +1,35 @@
+
+error = error;
+
+id x = x;
+
+cons h t cc cn = cc h t;
+nil cc cn = cn;
+
+head xs = xs true error;
+tail xs = xs false error;
+
+map xs f = xs (map_a f) nil;
+map_a f h t = cons (f h) (map t f);
+
+fold xs f z = xs (fold_a f z) z;
+fold_a f z h t = fold t f (f h z);
+
+true l r = l;
+false l r = r;
+not t = t false true;
+and l r = l r false;
+or l r = l true r;
+xor l r = l (not r) r;
+
+thing = head (tail (cons 7 (cons 1 (cons 2 nil))));
+logic = (xor false true) 0 1;
+
+log_list = cons true (cons false (cons true nil));
+gives_zero = (fold log_list xor true) 0 1;
+
+forever x = cons x (forever x);
+
+fold_map = (fold (map log_list not) xor true) 0 1;
+
+main = fold_map;
