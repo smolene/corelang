@@ -14,6 +14,7 @@ map_a f h t = cons (f h) (map t f);
 
 fold xs f z = xs (fold_a f z) z;
 fold_a f z h t = fold t f (f h z);
+reverse xs = fold xs cons nil;
 
 true l r = l;
 false l r = r;
@@ -22,7 +23,7 @@ and l r = l r false;
 or l r = l true r;
 xor l r = l (not r) r;
 
-thing = head (tail (cons 7 (cons 1 (cons 2 nil))));
+list_num = cons 7 (cons 1 (cons 2 nil));
 logic = (xor false true) 0 1;
 
 log_list = cons true (cons false (cons true nil));
@@ -30,6 +31,8 @@ gives_zero = (fold log_list xor true) 0 1;
 
 forever x = cons x (forever x);
 
-fold_map = (fold (map log_list not) xor true) 0 1;
+fold_map = (fold (map log_list not) xor true) 1 0;
 
 main = fold_map;
+
+

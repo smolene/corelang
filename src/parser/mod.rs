@@ -286,9 +286,19 @@ pub mod inner {
             let (s, _) = multispace0(s)?;
             let (s, cons) = context("cons", many0(preceded(multispace0, constructor)))(s)?;
             let (s, _) = multispace0(s)?;
-            let (s, sc) = context("scdef", many1(preceded(multispace0, supercombinator)))(s)?;
+            let (s, sc) = context("scdef",
+              many1(preceded(delimited(multispace0, many0(comment), multispace0), supercombinator))
+            )(s)?;
             let (s, _) = multispace0(s)?;
             Ok((s, Program(sc, cons)))
+        })(s)
+    }
+
+    pub fn comment(s: &str) -> IResult<&str, (), VerboseError<&str>> {
+        context("comment", |s| {
+            let (s, _) = tag("//")(s)?;
+            let (s, _) = take_while(|c| c != '\n')(s)?;
+            Ok((s, ()))
         })(s)
     }
 

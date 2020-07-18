@@ -5,7 +5,9 @@ use std::rc::Rc;
 use std::fmt::Write;
 use string_interner::{Sym, DefaultStringInterner};
 use crate::parser::{Name, ScDef, CScDef, CExpr, Expr, parse_core_program, Program};
-use nom::lib::std::collections::BTreeMap;
+use std::collections::BTreeMap;
+use std::time::Instant;
+use std::io::{stdin, stdout, Write as IoWrite};
 
 #[derive(Copy, Clone, Debug)]
 struct CodeK;
@@ -47,6 +49,7 @@ enum Op {
     PushV(VMode),
     BinOp(BinOp),
     Cond(Index<CodeK>, Index<CodeK>),
+    Break,
 }
 
 #[derive(Clone, Debug)]
@@ -120,11 +123,32 @@ impl Tim {
     fn jump_to_code(ops: &mut Vec<Op>, code: &Code, rec: &mut Vec<Code>) {
         ops.clear();
         ops.extend(code.0.iter().cloned().rev()); // rev because code stores 0: start, n-1: end but self.ops is a stack where n-1: start
-        rec.push(code.clone());
+        //rec.push(code.clone());
     }
 
     fn run(&mut self) -> Result<(), String> {
+        let mut is_debug = true;
         loop {
+            if is_debug {
+                let mut buf = String::new();
+                print!("{}>", self.debug);
+                stdout().flush().unwrap();
+                stdin().read_line(&mut buf).unwrap();
+                if buf.trim() == "run" { is_debug = false }
+                else {
+                    let mut s = String::new();
+                    display_op(self.ops.last().unwrap_or(&Op::Break), &self.code, &self.heap, &self.frame_ptr, &mut s, &self.inter).unwrap();
+                    println!("{}< {}", self.debug, &s);
+
+                    for (i, Closure(idx, _)) in self.stack.iter().enumerate() {
+                        if let Some(x) = self.code.lookup(*idx).1 {
+                            println!("{}: {}", i, self.inter.resolve(x).unwrap());
+                        }
+                    }
+                    println!();
+                }
+            }
+
             match self.step() {
                 Ok(true) => return Ok(()),
                 Err(s) => return Err(s),
@@ -137,6 +161,7 @@ impl Tim {
         self.debug += 1;
         if let Some(op) = self.ops.pop() {
             match op {
+                Op::Break => return Err("Break!".to_string()),
                 Op::Take(n) => {
                     if self.stack.len() < n {
                         return Err("Not enough arguments on stack".to_string());
@@ -227,27 +252,75 @@ impl Tim {
     }
 }
 
+fn garbage_collect(tim: &mut Tim) {
+
+}
+
 fn make_tim_program(prog: &Program<Name>, mut inter: DefaultStringInterner) -> Tim {
     let (s, m, b) = compile_program(prog, &mut inter);
     Tim::new(s, m, b, inter)
 }
 
-fn defaults(store: &mut Store<Code, CodeK>, inter: &mut DefaultStringInterner) -> BTreeMap<Name, Index<CodeK>> {
+fn predef(store: &mut Store<Code, CodeK>, inter: &mut DefaultStringInterner) -> BTreeMap<Name, Index<CodeK>> {
     let empty = inter.get_or_intern("__empty");
     let empty_idx = store.insert(Code(vec![], Some(empty)));
     let int_op = inter.get_or_intern("__int_op");
     let int_op_idx = store.insert(Code(vec![Op::PushV(VMode::FromFramePtr), Op::Return], Some(int_op)));
+    let error = inter.get_or_intern("error");
+    let error_idx = store.insert(Code(vec![Op::Break], Some(error)));
 
-    let add = inter.get_or_intern("add");
-    let add_idx = empty_idx;
+    let if_op = inter.get_or_intern("if");
+    let if_op_x = inter.get_or_intern("__if_x");
+    let if_op_t = inter.get_or_intern("__if_t");
+    let if_op_f = inter.get_or_intern("__if_f");
+    let if_t = store.insert(Code(vec![Op::Enter(Mode::Arg(1))], Some(if_op_t)));
+    let if_f = store.insert(Code(vec![Op::Enter(Mode::Arg(0))], Some(if_op_f)));
+    let if_x = store.insert(Code(vec![Op::Cond(if_t, if_f)], Some(if_op_x)));
+    let if_idx = store.insert(Code(vec![Op::Take(3), Op::Push(Mode::Label(if_x)), Op::Enter(Mode::Arg(2))], Some(if_op))); // FIXME? it seems to work uwu
 
-    vec![(empty, empty_idx), (int_op, int_op_idx), (add, add_idx)].into_iter().collect()
+    macro_rules! def_op {
+        ($name:ident, $bop:ident) => {
+            {
+                let n = inter.get_or_intern(stringify!($name));
+                let n_1 = inter.get_or_intern(stringify!($name).to_string() + "_1");
+                let n_2 = inter.get_or_intern(stringify!($name).to_string() + "_2");
+                let n_idx_2 = store.insert(Code(vec![Op::BinOp(BinOp::$bop), Op::Return], Some(n_2)));
+                let n_idx_1 = store.insert(Code(vec![Op::Push(Mode::Label(n_idx_2)), Op::Enter(Mode::Arg(1))], Some(n_1)));
+                let n_idx = store.insert(Code(vec![Op::Take(2), Op::Push(Mode::Label(n_idx_1)), Op::Enter(Mode::Arg(0))], Some(n)));
+                [(n, n_idx), (n_1, n_idx_1), (n_2, n_idx_2)]
+            }
+        };
+    }
+
+    macro_rules! def_many {
+        ($($name:ident, $bop:ident),*) => {
+            {
+                let mut map = BTreeMap::<Name, Index<CodeK>>::new();
+                $(
+                    map.extend(def_op!($name, $bop).iter().copied());
+                )*
+                map
+            }
+        };
+    }
+
+    let mut map = def_many!(add, Add, sub, Sub, mul, Mul, div, Div, lt, Lt, lte, Lte, gt, Gt, gte, Gte, eq, Eq, neq, Neq);
+    map.insert(empty, empty_idx);
+    map.insert(int_op, int_op_idx);
+    map.insert(error, error_idx);
+    map.insert(if_op, if_idx);
+    map.insert(if_op_t, if_t);
+    map.insert(if_op_f, if_f);
+    map.insert(if_op_x, if_x);
+    map
 }
 
 fn compile_program(prog: &Program<Name>, inter: &mut DefaultStringInterner) -> (Store<Code, CodeK>, Index<CodeK>, BTreeMap<Name, Index<CodeK>>) {
     let mut store = Store::new();
-    let mut env = BTreeMap::new();
+    let pred = predef(&mut store, inter);
+    let mut env = pred.iter().map(|(k, v)| (*k, Mode::Label(*v))).collect::<BTreeMap<Name, Mode>>();
     for ScDef(name, _args, _e) in prog.0.iter() {
+        assert!(!env.contains_key(name));
         env.insert(*name, Mode::Label(store.insert(Code(vec![], Some(*name))))); // insert empty code sequences
     }
     let main = inter.get_or_intern("main");
@@ -263,8 +336,7 @@ fn compile_program(prog: &Program<Name>, inter: &mut DefaultStringInterner) -> (
         } else { unreachable!() }
     }
 
-    let d = defaults(&mut store, inter);
-    (store, main_idx.expect("No main supercombinator was declared"), d)
+    (store, main_idx.expect("No main supercombinator was declared"), pred)
 }
 
 fn compile_sc(env: &BTreeMap<Name, Mode>, sc: &CScDef, store: &mut Store<Code, CodeK>, inter: &mut DefaultStringInterner) -> Code {
@@ -324,36 +396,60 @@ fn compile_a(env: &BTreeMap<Name, Mode>, expr: &Expr<Name>, store: &mut Store<Co
     }
 }
 
-fn display_all_code(store: &Store<Code, CodeK>, w: &mut impl Write, inter: &DefaultStringInterner) -> std::fmt::Result {
+fn display_all_code(store: &Store<Code, CodeK>, heap: &GcStore<Frame, FrameK>, frame_ptr: &FramePtr, w: &mut impl Write, inter: &DefaultStringInterner) -> std::fmt::Result {
     for c in store.inner().iter() {
-        display_code(c, store, w, inter)?;
+        display_code(c, store, heap, frame_ptr, w, inter)?;
         write!(w, "\n")?;
     }
     Ok(())
 }
 
-fn display_code(c: &Code, store: &Store<Code, CodeK>, w: &mut impl Write, inter: &DefaultStringInterner) -> std::fmt::Result {
+fn display_code(c: &Code, store: &Store<Code, CodeK>, heap: &GcStore<Frame, FrameK>, frame_ptr: &FramePtr, w: &mut impl Write, inter: &DefaultStringInterner) -> std::fmt::Result {
     write!(w, "{}:\n", c.1.and_then(|n| inter.resolve(n)).unwrap_or("<unnamed>"))?;
     for (i, op) in c.0.iter().enumerate() {
-        write!(w, "{:>3}: {:?}", i, op)?;
-        let mut f = |m: &Mode| match m {
-            Mode::Label(i) => {
-                if let Some(x) = store.lookup(*i).1 {
-                    write!(w, " --> {}", inter.resolve(x).unwrap())
-                } else {
-                    Ok(())
-                }
-            },
-            _ => Ok(()),
-        };
-        match op {
-            Op::Enter(m) => f(m)?,
-            Op::Push(m) => f(m)?,
-            _ => (),
-        }
-        write!(w, "\n")?;
+        write!(w, "{:>3}: ", i)?;
+        display_op(op, store, heap, frame_ptr, w, inter)?;
     }
     Ok(())
+}
+
+fn display_op(op: &Op, store: &Store<Code, CodeK>, heap: &GcStore<Frame, FrameK>, frame_ptr: &FramePtr, w: &mut impl Write, inter: &DefaultStringInterner) -> std::fmt::Result {
+    write!(w, "{:?}", op)?;
+    let mut f = |m: &Mode| match m {
+        Mode::Label(i) => {
+            if let Some(x) = store.lookup(*i).1 {
+                write!(w, " --> {}", inter.resolve(x).unwrap())
+            } else {
+                Ok(())
+            }
+        },
+        Mode::Arg(n) => {
+            if let Ok(&fr) = frame_ptr.as_frame() {
+                let frame = heap.lookup(fr);
+                if let Some(Closure(index, ptr)) = frame.0.get(*n) {
+                    if let Some(x) = store.lookup(*index).1 {
+                        write!(w, " --> {}", inter.resolve(x).unwrap())?
+                    }
+                }
+            }
+            Ok(())
+        }
+        _ => Ok(()),
+    };
+    match op {
+        Op::Enter(m) => f(m)?,
+        Op::Push(m) => f(m)?,
+        Op::Cond(i, j) => {
+            if let Some(x) = store.lookup(*i).1 {
+                write!(w, " <l> --> {}", inter.resolve(x).unwrap())?;
+            }
+            if let Some(x) = store.lookup(*j).1 {
+                write!(w, " <r> --> {}", inter.resolve(x).unwrap())?;
+            }
+        }
+        _ => (),
+    }
+    write!(w, "\n")
 }
 
 pub fn test_file(path: &str) {
@@ -366,18 +462,21 @@ pub fn test_file(path: &str) {
     let mut tim = make_tim_program(&prog, inter);
 
     let mut s = String::new();
-    display_all_code(&tim.code, &mut s, &mut tim.inter).unwrap();
+    display_all_code(&tim.code, &tim.heap, &tim.frame_ptr, &mut s, &mut tim.inter).unwrap();
     println!("{}", s);
 
+    let now = Instant::now();
     let res = tim.run();
+    let delta = now.elapsed();
     s.clear();
-    display_code(&Code(tim.ops.clone(), None), &tim.code, &mut s, &tim.inter).unwrap();
+    display_code(&Code(tim.ops.clone(), None), &tim.code, &tim.heap, &tim.frame_ptr, &mut s, &tim.inter).unwrap();
     println!("{}", s);
-    for code in tim.opsrecord {
+    for code in tim.opsrecord.iter().skip(tim.opsrecord.len().saturating_sub(40)) {
         s.clear();
-        display_code(&code, &tim.code, &mut s, &tim.inter).unwrap();
+        display_code(code, &tim.code, &tim.heap, &tim.frame_ptr, &mut s, &tim.inter).unwrap();
         println!("{}", s);
     }
-    println!("finished: \n{:?}\n{:?}\n{}", res, tim.frame_ptr, tim.debug);
+    let bytes = 0; //tim.heap.inner().len() * size_of::<Frame>();
+    println!("finished: \n{:?}\nframe_ptr: {:?}\ndebug: {}\nused mem: {}B | {} objects\ntime: {}", res, tim.frame_ptr, tim.debug, bytes, tim.heap.inner().len(), delta.as_secs_f32());
     println!("{:?}", tim.vstack);
 }

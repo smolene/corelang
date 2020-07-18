@@ -1,0 +1,40 @@
+
+cons h t cc cn = cc h t;
+some x cs cn = cs x;
+unary cs cn = cs;
+nil cc cn = cn;
+
+from n = cons n (from (add n 1));
+repeat x = cons x (repeat x);
+take n xs = if n (xs (take_a n) nil) nil;
+take_a n h t = cons h (take (sub n 1) t);
+
+head xs = xs unary error;
+tail xs = xs nil error;
+last xs = last_a xs error;
+last_a xs l = xs last_b l;
+last_b h t = last_a t h;
+count xs = fold xs count_f 0;
+count_f h z = add 1 z;
+nth xs n = last (take n xs);
+
+map xs f = xs (map_a f) nil;
+map_a f h t = cons (f h) (map t f);
+
+filter xs f = xs (filter_a f) nil;
+filter_a f h t = if (f h) (cons h (filter t f)) (filter t f);
+take_while xs f = xs (take_while_a f) nil;
+take_while_a f h t = if (f h) (cons h (take_while t f)) nil;
+
+fold xs f z = xs (fold_a f z) z;
+fold_a f z h t = fold t f (f h z);
+
+sum xs = fold xs add 0;
+reverse xs = fold xs cons nil;
+
+true l r = l;
+false l r = r;
+
+//twice f x = let res = f x in (cons res (cons res nil));
+
+main = sum (take 1000 (from 1));

@@ -12,7 +12,7 @@ mod store;
 mod tim;
 
 fn main() {
-    test_file("core/test_tim.core");
+    test_file("core/test_tim_num.core");
     //parse_test("core/test_0.core");
 }
 
