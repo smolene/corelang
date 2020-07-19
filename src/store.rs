@@ -46,6 +46,12 @@ impl<T, K> Store<T, K> {
 #[derive(Debug, Copy, Clone)]
 pub struct Handle<K>(usize, PhantomData<K>);
 
+impl<K> Handle<K> {
+    pub fn get_inner(&self) -> usize {
+        self.0
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct GcStore<T, K> {
     store: Vec<T>,

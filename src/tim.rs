@@ -8,6 +8,7 @@ use crate::parser::{Name, ScDef, CScDef, CExpr, Expr, parse_core_program, Progra
 use std::collections::BTreeMap;
 use std::time::Instant;
 use std::io::{stdin, stdout, Write as IoWrite};
+use nom::lib::std::collections::HashSet;
 
 #[derive(Copy, Clone, Debug)]
 struct CodeK;
@@ -120,39 +121,65 @@ impl Tim {
         s
     }
 
-    fn jump_to_code(ops: &mut Vec<Op>, code: &Code, rec: &mut Vec<Code>) {
+    fn jump_to_code(ops: &mut Vec<Op>, code: &Code, _rec: &mut Vec<Code>) {
         ops.clear();
         ops.extend(code.0.iter().cloned().rev()); // rev because code stores 0: start, n-1: end but self.ops is a stack where n-1: start
         //rec.push(code.clone());
     }
 
     fn run(&mut self) -> Result<(), String> {
-        let mut is_debug = true;
+        let mut counter = 0;
+        let mut res = Ok(false);
         loop {
-            if is_debug {
+            if res.is_err() || res == Ok(true) || counter == 0 {
                 let mut buf = String::new();
-                print!("{}>", self.debug);
+                print!("{}> ", self.debug);
                 stdout().flush().unwrap();
                 stdin().read_line(&mut buf).unwrap();
-                if buf.trim() == "run" { is_debug = false }
-                else {
-                    let mut s = String::new();
-                    display_op(self.ops.last().unwrap_or(&Op::Break), &self.code, &self.heap, &self.frame_ptr, &mut s, &self.inter).unwrap();
-                    println!("{}< {}", self.debug, &s);
-
+                if buf.trim() == "run" {
+                    counter = u64::max_value();
+                } else if buf.starts_with("step") {
+                    if let Some(s) = buf.split_whitespace().skip(1).next() {
+                        if let Ok(n) = s.parse::<u64>() {
+                            counter = n;
+                        } else { continue; }
+                    } else { continue; }
+                } else if buf.trim() == "stack" {
                     for (i, Closure(idx, _)) in self.stack.iter().enumerate() {
                         if let Some(x) = self.code.lookup(*idx).1 {
                             println!("{}: {}", i, self.inter.resolve(x).unwrap());
                         }
                     }
-                    println!();
-                }
-            }
+                    continue;
+                } else if buf.trim() == "graph" {
+                    self.visit_reachable(|h, depth| {
+                        let Frame(v) = self.heap.lookup(h);
+                        println!("{:padding$}[{}]", "", h.get_inner(), padding = depth as usize * 2);
+                        for Closure(i, x) in v {
+                            let name = self.code.lookup(*i).1
+                                .and_then(|n| self.inter.resolve(n))
+                                .unwrap_or("<unnamed>");
 
-            match self.step() {
-                Ok(true) => return Ok(()),
-                Err(s) => return Err(s),
-                _ => (),
+                            println!("{:padding$}| {}", "", name, padding = depth as usize * 2);
+                        }
+                    });
+                } else if buf.trim() == "quit" {
+                    return res.map(|_| ());
+                } else {
+                    if let Err(s) = &res {
+                        println!("Error: {:?}", s);
+                        continue;
+                    }
+                    let mut s = String::new();
+                    display_op(self.ops.last().unwrap_or(&Op::Break), &self.code, &self.heap, &self.frame_ptr, &mut s, &self.inter).unwrap();
+                    print!("{}< {}", self.debug, &s);
+                    res = self.step();
+                    println!(" | {:?}", res);
+                    counter = counter.saturating_sub(1);
+                }
+            } else {
+                res = self.step();
+                counter = counter.saturating_sub(1);
             }
         }
     }
@@ -250,10 +277,33 @@ impl Tim {
             Ok(true)
         }
     }
-}
 
-fn garbage_collect(tim: &mut Tim) {
+    fn visit_reachable<F: FnMut(Handle<FrameK>, u64)>(&self, mut f: F) {
+        let mut roots = vec![];
+        if let Ok(&h) = self.frame_ptr.as_frame() {
+            roots.push(h);
+        }
+        roots.extend(self.stack.iter().flat_map(|Closure(_, fptr)| fptr.as_frame().ok()));
 
+        fn visit<F: FnMut(Handle<FrameK>, u64)>(tim: &Tim, h: Handle<FrameK>, depth: u64, f: &mut F) {
+            let Frame(v) = tim.heap.lookup(h);
+            for (&_idx, &h) in v.iter().flat_map(|Closure(idx, fptr)| fptr.as_frame().ok().map(|p| (idx, p))) {
+                f(h, depth);
+                visit(tim, h, depth + 1, f);
+            }
+        }
+
+        for h in roots {
+            f(h, 0);
+            visit(self, h, 1, &mut f);
+        }
+    }
+
+    fn list_reachable(&self) -> Vec<Handle<FrameK>> {
+        let mut v = vec![];
+        self.visit_reachable(|h, _| v.push(h));
+        v
+    }
 }
 
 fn make_tim_program(prog: &Program<Name>, mut inter: DefaultStringInterner) -> Tim {
@@ -426,7 +476,7 @@ fn display_op(op: &Op, store: &Store<Code, CodeK>, heap: &GcStore<Frame, FrameK>
         Mode::Arg(n) => {
             if let Ok(&fr) = frame_ptr.as_frame() {
                 let frame = heap.lookup(fr);
-                if let Some(Closure(index, ptr)) = frame.0.get(*n) {
+                if let Some(Closure(index, _ptr)) = frame.0.get(*n) {
                     if let Some(x) = store.lookup(*index).1 {
                         write!(w, " --> {}", inter.resolve(x).unwrap())?
                     }
