@@ -152,19 +152,31 @@ impl Tim {
                     }
                     continue;
                 } else if buf.trim() == "graph" {
-                    self.visit_reachable(|h, depth| {
-                        let Frame(v) = self.heap.lookup(h);
+                    /*self.visit_reachable(|h, v, depth| {
                         println!("{:padding$}[{}]", "", h.get_inner(), padding = depth as usize * 2);
-                        for Closure(i, x) in v {
+                        for Closure(i, _x) in v {
                             let name = self.code.lookup(*i).1
                                 .and_then(|n| self.inter.resolve(n))
                                 .unwrap_or("<unnamed>");
 
                             println!("{:padding$}| {}", "", name, padding = depth as usize * 2);
                         }
+                    });*/
+                    self.visit_reachable(|_h, v, depth, i| {
+                        let name = self.code.lookup(v.0).1
+                            .and_then(|n| self.inter.resolve(n))
+                            .unwrap_or("<unnamed>");
+
+                        println!("{:padding$}|{}: {}", "", i, name, padding = depth as usize * 2);
+                    }, |h, _c, depth| {
+                        println!("{:padding$}[{}]", "", h.get_inner(), padding = depth as usize * 2);
                     });
                 } else if buf.trim() == "quit" {
                     return res.map(|_| ());
+                } else if buf.trim() == "stackv" {
+                    for (idx, val) in self.vstack.iter().enumerate() {
+                        println!("{}: {}", idx, val);
+                    }
                 } else {
                     if let Err(s) = &res {
                         println!("Error: {:?}", s);
@@ -278,30 +290,57 @@ impl Tim {
         }
     }
 
-    fn visit_reachable<F: FnMut(Handle<FrameK>, u64)>(&self, mut f: F) {
+    fn visit_reachable<
+        F: FnMut(Handle<FrameK>, &Closure, u64, usize),
+        G: FnMut(Handle<FrameK>, &[Closure], u64),
+    >(&self, mut f: F, mut g: G) {
+
+        /*fn visit_preorder<F: FnMut(Handle<FrameK>, &[Closure], u64)>(tim: &Tim, fptr: &FramePtr, depth: u64, f: &mut F) {
+            match fptr {
+                FramePtr::Frame(h) => {
+                    let frame = tim.heap.lookup(*h);
+                    f(*h, frame.0.as_slice(), depth);
+                    for Closure(_idx, new_fptr) in &frame.0 {
+                        visit_preorder(tim, new_fptr, depth + 1, f);
+                    }
+                }
+                FramePtr::Const(_c) => (),
+                FramePtr::None => (),
+            }
+        }*/
+
+        fn visit<
+            F: FnMut(Handle<FrameK>, &Closure, u64, usize),
+            G: FnMut(Handle<FrameK>, &[Closure], u64),
+        >(tim: &Tim, fptr: &FramePtr, depth: u64, f: &mut F, g: &mut G) {
+            match fptr {
+                FramePtr::Frame(h) => {
+                    let frame = tim.heap.lookup(*h);
+                    g(*h, frame.0.as_slice(), depth);
+                    for (i, c) in frame.0.iter().enumerate() {
+                        f(*h, c, depth, i);
+                        visit(tim, &c.1, depth + 1, f, g);
+                    }
+                }
+                FramePtr::Const(_c) => (),
+                FramePtr::None => (),
+            }
+        }
+
         let mut roots = vec![];
         if let Ok(&h) = self.frame_ptr.as_frame() {
             roots.push(h);
         }
         roots.extend(self.stack.iter().flat_map(|Closure(_, fptr)| fptr.as_frame().ok()));
 
-        fn visit<F: FnMut(Handle<FrameK>, u64)>(tim: &Tim, h: Handle<FrameK>, depth: u64, f: &mut F) {
-            let Frame(v) = tim.heap.lookup(h);
-            for (&_idx, &h) in v.iter().flat_map(|Closure(idx, fptr)| fptr.as_frame().ok().map(|p| (idx, p))) {
-                f(h, depth);
-                visit(tim, h, depth + 1, f);
-            }
-        }
-
         for h in roots {
-            f(h, 0);
-            visit(self, h, 1, &mut f);
+            visit(self, &FramePtr::Frame(h), 0, &mut f, &mut g);
         }
     }
 
     fn list_reachable(&self) -> Vec<Handle<FrameK>> {
         let mut v = vec![];
-        self.visit_reachable(|h, _| v.push(h));
+        self.visit_reachable(|h, _f, _, _| v.push(h), |_, _, _| {});
         v
     }
 }

@@ -34,7 +34,14 @@ reverse xs = fold xs cons nil;
 
 true l r = l;
 false l r = r;
+or l r = l true r;
+and l r = l r false;
 
-//twice f x = let res = f x in (cons res (cons res nil));
+mod dividend divisor = if (eq dividend 0) true (if (lt dividend 0) false (sub dividend divisor));
 
-main = sum (take 1000 (from 1));
+isprime_a x acc = if (lt acc x) (if (mod x acc) false (isprime_a x (sub acc 1))) true;
+isprime x = isprime_a x (sub x 1);
+
+sumallnumbers = filter (take 1000 (from 1)) isprime;
+
+main = sumallnumbers;
