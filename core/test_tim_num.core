@@ -44,4 +44,13 @@ isprime x = isprime_a x (sub x 1);
 
 sumallnumbers = filter (take 1000 (from 1)) isprime;
 
-main = sumallnumbers;
+odd x = modulo x 2;
+
+collatz x = if (odd x) (add 1 (mul x 3)) (div x 2);
+
+apply_collatz x = apply_collatz_a (collatz (print x));
+apply_collatz_a cx = if (eq 1 cx) cx (apply_collatz cx);
+
+main = last (take 50000 (repeat 0));
+
+
