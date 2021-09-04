@@ -1,11 +1,16 @@
 #![allow(dead_code)]
 
 use crate::store::{Index, Store, GcStore, Handle};
+use std::cell::RefCell;
+use std::fs::File;
 use std::rc::Rc;
 use std::fmt::Write;
+use petgraph::Graph;
+use petgraph::data::Build;
+use petgraph::graph::{DiGraph, NodeIndex};
 use string_interner::{Sym, DefaultStringInterner};
 use crate::parser::{Name, ScDef, CScDef, CExpr, Expr, parse_core_program, Program};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::time::Instant;
 use std::io::{stdin, stdout, Write as IoWrite};
 use nom::lib::std::collections::HashSet;
@@ -13,7 +18,7 @@ use nom::lib::std::collections::HashSet;
 #[derive(Copy, Clone, Debug)]
 struct CodeK;
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 struct FrameK;
 
 #[derive(Clone, Debug)]
@@ -25,7 +30,7 @@ struct Closure(Index<CodeK>, FramePtr);
 #[derive(Clone, Debug)]
 struct Frame(Vec<Closure>);
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 enum FramePtr {
     Frame(Handle<FrameK>),
     Const(Const),
@@ -84,7 +89,7 @@ enum BinOp {
 
 type Int = i64;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 enum Const {
     Int(Int),
 }
@@ -129,67 +134,132 @@ impl Tim {
         //rec.push(code.clone());
     }
 
+    fn print_stack(&self) {
+        for (i, Closure(idx, _)) in self.stack.iter().enumerate() {
+            if let Some(x) = self.code.lookup(*idx).1 {
+                println!("c{}: {}", i, self.inter.resolve(x).unwrap());
+            }
+        }
+        if self.stack.is_empty() {
+            println!("stack empty");
+        }
+        println!();
+    }
+
+    fn print_stackv(&self) {
+        for (idx, val) in self.vstack.iter().enumerate() {
+            println!("v{}: {}", idx, val);
+        }
+        if self.vstack.is_empty() {
+            println!("vstack empty");
+        }
+        println!()
+    }
+
+    fn print_graph(&self) {
+        /*self.visit_reachable(|h, v, depth| {
+            println!("{:padding$}[{}]", "", h.get_inner(), padding = depth as usize * 2);
+            for Closure(i, _x) in v {
+                let name = self.code.lookup(*i).1
+                    .and_then(|n| self.inter.resolve(n))
+                    .unwrap_or("<unnamed>");
+
+                println!("{:padding$}| {}", "", name, padding = depth as usize * 2);
+            }
+        });*/
+        // /*
+        self.visit_reachable(|_h, v, depth, i| {
+            let name = self.code.lookup(v.0).1
+                .and_then(|n| self.inter.resolve(n))
+                .unwrap_or("<unnamed>");
+
+            println!("{:padding$}|{}: {}", "", i, name, padding = depth as usize * 2);
+        }, |h, _c, depth| {
+
+
+            println!("{:padding$}[{}]", "", h.get_inner(), padding = depth as usize * 2);
+        }, |c, depth| {
+            println!("{:padding$}{{ {:?} }}", "", c, padding = depth as usize * 2);
+        }); // */
+        /*
+        self.visit_reachable(|_h, v, depth, i| {
+            println!("{:padding$}|{}: {}", "", i, name, padding = depth as usize * 2);
+        }, |h, _c, depth| {
+            let name = self.heap.lookup(h).;
+
+            println!("{:padding$}[{}]", "", h.get_inner(), padding = depth as usize * 2);
+        }, |c, depth| {
+            println!("{:padding$}{{ {:?} }}", "", c, padding = depth as usize * 2);
+        }); // */
+        println!();
+    }
+
     fn run(&mut self) -> Result<(), String> {
         let mut counter = 0;
         let mut res = Ok(false);
+        let mut auto_stack = true;
+        let mut auto_stackv = true;
+        let mut auto_graph = true;
         loop {
             if res.is_err() || res == Ok(true) || counter == 0 {
+
+                if res != Ok(false) {
+                    self.print_stackv();
+                }
+
+                if auto_stack { self.print_stack() }
+                if auto_stackv { self.print_stackv() }
+                if auto_graph { /* self.print_graph() */ self.make_graph() }
+
                 let mut buf = String::new();
                 print!("{}> ", self.debug);
                 stdout().flush().unwrap();
                 stdin().read_line(&mut buf).unwrap();
+
                 if buf.trim() == "run" {
                     counter = u64::max_value();
                 } else if buf.starts_with("step") {
                     if let Some(s) = buf.split_whitespace().skip(1).next() {
                         if let Ok(n) = s.parse::<u64>() {
                             counter = n;
-                        } else { continue; }
-                    } else { continue; }
-                } else if buf.trim() == "stack" {
-                    for (i, Closure(idx, _)) in self.stack.iter().enumerate() {
-                        if let Some(x) = self.code.lookup(*idx).1 {
-                            println!("{}: {}", i, self.inter.resolve(x).unwrap());
                         }
                     }
-                    continue;
-                } else if buf.trim() == "graph" {
-                    /*self.visit_reachable(|h, v, depth| {
-                        println!("{:padding$}[{}]", "", h.get_inner(), padding = depth as usize * 2);
-                        for Closure(i, _x) in v {
-                            let name = self.code.lookup(*i).1
-                                .and_then(|n| self.inter.resolve(n))
-                                .unwrap_or("<unnamed>");
-
-                            println!("{:padding$}| {}", "", name, padding = depth as usize * 2);
+                } else if buf.starts_with("auto") {
+                    if let Some(s) = buf.split_whitespace().skip(1).next() {
+                        match s {
+                            "stack" => auto_stack = !auto_stack,
+                            "stackv" => auto_stackv = !auto_stackv,
+                            "graph" => auto_graph = !auto_graph,
+                            "on" | "off" => {
+                                let v = s == "on";
+                                auto_stack = v;
+                                auto_stackv = v;
+                                auto_graph = v;
+                            },
+                            _ => println!("Invalid argument: auto {{stack|stackv|graph|on|off}}"),
                         }
-                    });*/
-                    self.visit_reachable(|_h, v, depth, i| {
-                        let name = self.code.lookup(v.0).1
-                            .and_then(|n| self.inter.resolve(n))
-                            .unwrap_or("<unnamed>");
-
-                        println!("{:padding$}|{}: {}", "", i, name, padding = depth as usize * 2);
-                    }, |h, _c, depth| {
-                        println!("{:padding$}[{}]", "", h.get_inner(), padding = depth as usize * 2);
-                    });
+                    }
+                } else if buf.trim() == "stack" {
+                    self.print_stack();
+                } else if buf.trim() == "stackv" {
+                    self.print_stackv();
+                } else if buf.trim() == "graph" {
+                    self.print_graph();
+                    self.make_graph();
                 } else if buf.trim() == "quit" {
                     return res.map(|_| ());
-                } else if buf.trim() == "stackv" {
-                    for (idx, val) in self.vstack.iter().enumerate() {
-                        println!("{}: {}", idx, val);
-                    }
                 } else {
                     if let Err(s) = &res {
                         println!("Error: {:?}", s);
-                        continue;
+                    } else {
+                        let mut s = String::new();
+                        display_op(self.ops.last().unwrap_or(&Op::Break), &self.code, &self.heap, &self.frame_ptr, &mut s, &self.inter).unwrap();
+                        print!("{}< {}", self.debug, &s);
+                        res = self.step();
+                        println!(" | {:?}", res);
+                        counter = counter.saturating_sub(1);
                     }
-                    let mut s = String::new();
-                    display_op(self.ops.last().unwrap_or(&Op::Break), &self.code, &self.heap, &self.frame_ptr, &mut s, &self.inter).unwrap();
-                    print!("{}< {}", self.debug, &s);
-                    res = self.step();
-                    println!(" | {:?}", res);
-                    counter = counter.saturating_sub(1);
+                    println!();
                 }
             } else {
                 res = self.step();
@@ -301,7 +371,8 @@ impl Tim {
     fn visit_reachable<
         F: FnMut(Handle<FrameK>, &Closure, u64, usize),
         G: FnMut(Handle<FrameK>, &[Closure], u64),
-    >(&self, mut f: F, mut g: G) {
+        H: FnMut(&Const, u64),
+    >(&self, mut f: F, mut g: G, mut h: H) {
 
         /*fn visit_preorder<F: FnMut(Handle<FrameK>, &[Closure], u64)>(tim: &Tim, fptr: &FramePtr, depth: u64, f: &mut F) {
             match fptr {
@@ -320,17 +391,18 @@ impl Tim {
         fn visit<
             F: FnMut(Handle<FrameK>, &Closure, u64, usize),
             G: FnMut(Handle<FrameK>, &[Closure], u64),
-        >(tim: &Tim, fptr: &FramePtr, depth: u64, f: &mut F, g: &mut G) {
+            H: FnMut(&Const, u64),
+        >(tim: &Tim, fptr: &FramePtr, depth: u64, f: &mut F, g: &mut G, h: &mut H) {
             match fptr {
-                FramePtr::Frame(h) => {
-                    let frame = tim.heap.lookup(*h);
-                    g(*h, frame.0.as_slice(), depth);
+                FramePtr::Frame(handle) => {
+                    let frame = tim.heap.lookup(*handle);
+                    g(*handle, frame.0.as_slice(), depth);
                     for (i, c) in frame.0.iter().enumerate() {
-                        f(*h, c, depth, i);
-                        visit(tim, &c.1, depth + 1, f, g);
+                        f(*handle, c, depth, i);
+                        visit(tim, &c.1, depth + 1, f, g, h);
                     }
                 }
-                FramePtr::Const(_c) => (),
+                FramePtr::Const(c) => h(c, depth),
                 FramePtr::None => (),
             }
         }
@@ -341,14 +413,59 @@ impl Tim {
         }
         roots.extend(self.stack.iter().flat_map(|Closure(_, fptr)| fptr.as_frame().ok()));
 
-        for h in roots {
-            visit(self, &FramePtr::Frame(h), 0, &mut f, &mut g);
+        for handle in roots {
+            visit(self, &FramePtr::Frame(handle), 0, &mut f, &mut g, &mut h);
         }
+    }
+
+    fn make_graph(&self) {
+        let graph = RefCell::new(DiGraph::<FramePtr, &str>::new());
+        let reachable = RefCell::new(HashMap::new());
+
+        self.visit_reachable(|_, _, _, _| {}, |h, _cs, _depth| {
+            let frame_ptr = FramePtr::Frame(h);
+            reachable.borrow_mut()
+                .entry(frame_ptr)
+                .or_insert_with(|| graph.borrow_mut().add_node(frame_ptr));
+        }, |c, _depth| {
+            let frame_ptr = FramePtr::Const(*c);
+            reachable.borrow_mut()
+                .entry(frame_ptr)
+                .or_insert_with(|| graph.borrow_mut().add_node(frame_ptr));
+        });
+
+        let mut graph = graph.into_inner();
+        let reachable = reachable.into_inner();
+
+        self.visit_reachable(|h, c, _depth, _i| {
+            let src = FramePtr::Frame(h);
+            let dest = c.1;
+            let src_node = *reachable.get(&src).unwrap();
+            let dest_node = *reachable.get(&dest).unwrap();
+            graph.update_edge(src_node, dest_node, 
+                self.code.lookup(c.0).1
+                    .and_then(|sym| self.inter.resolve(sym))
+                    .unwrap_or("<unnamed>")
+            );
+        }, |_, _, _| {}, |_, _| {});
+
+        // /*
+        let graph = graph.map(|_, x| match x {
+            FramePtr::Const(_) | FramePtr::None => format!("{:?}", x),
+            FramePtr::Frame(h) => format!("@{}", h.get_inner()),
+        }, |_idx, e| {
+            e
+        }); // */
+
+        use petgraph::dot::*;
+        let dot = petgraph::dot::Dot::with_config(&graph, &[]);
+        let mut file = File::create("core/graph.dot").unwrap();
+        write!(&mut file, "{:?}", dot).unwrap();
     }
 
     fn list_reachable(&self) -> Vec<Handle<FrameK>> {
         let mut v = vec![];
-        self.visit_reachable(|h, _f, _, _| v.push(h), |_, _, _| {});
+        self.visit_reachable(|h, _f, _, _| v.push(h), |_, _, _| {}, |_, _| {});
         v
     }
 }
@@ -496,7 +613,7 @@ fn compile_a(env: &BTreeMap<Name, Mode>, expr: &Expr<Name>, store: &mut Store<Co
         Expr::Var(n) => env.get(n).unwrap_or_else(|| panic!("Could not find variable: {:?}", inter.resolve(*n))).clone(),
         Expr::Num(x) => Mode::Const(Const::Int(*x)),
         _ => {
-            let mut buf = format!("{} --> ", inter.resolve(sc_name).unwrap());
+            let mut buf = format!("{} :: ", inter.resolve(sc_name).unwrap());
             expr.pretty_print(&mut buf, inter, 0).unwrap();
             let mut code = Code(vec![], Some(inter.get_or_intern(buf)));
             compile_r(env, expr, &mut code, store, inter, sc_name);

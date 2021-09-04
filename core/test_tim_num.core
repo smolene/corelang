@@ -4,8 +4,11 @@ some x cs cn = cs x;
 unary cs cn = cs;
 nil cc cn = cn;
 
-from n = cons n (from (add n 1));
+fix f = f (fix f);
+repeat_fix x = fix (cons x);
+
 repeat x = cons x (repeat x);
+from n = cons n (from (add n 1));
 take n xs = if n (xs (take_a n) nil) nil;
 take_a n h t = cons h (take (sub n 1) t);
 
@@ -51,6 +54,6 @@ collatz x = if (odd x) (add 1 (mul x 3)) (div x 2);
 apply_collatz x = apply_collatz_a (collatz (print x));
 apply_collatz_a cx = if (eq 1 cx) cx (apply_collatz cx);
 
-main = last (take 50000 (repeat 0));
+main = sum (take 20 (repeat 1));
 
 

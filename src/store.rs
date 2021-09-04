@@ -43,7 +43,7 @@ impl<T, K> Store<T, K> {
     }
 }
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
 pub struct Handle<K>(usize, PhantomData<K>);
 
 impl<K> Handle<K> {
