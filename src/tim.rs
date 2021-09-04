@@ -51,6 +51,7 @@ enum Op {
     BinOp(BinOp),
     Cond(Index<CodeK>, Index<CodeK>),
     Break,
+    Print,
 }
 
 #[derive(Clone, Debug)]
@@ -78,6 +79,7 @@ enum BinOp {
     Gte,
     Eq,
     Neq,
+    Mod,
 }
 
 type Int = i64;
@@ -275,6 +277,7 @@ impl Tim {
                         Gte => (l >= r).into(),
                         Eq => (l == r).into(),
                         Neq => (l != r).into(),
+                        Mod => l % r,
                     };
                     self.vstack.push(res);
                 }
@@ -282,6 +285,11 @@ impl Tim {
                     let n = self.vstack.pop().ok_or("Not enough values on Vstack for cond")?;
                     let code = self.code.lookup(if n == 0 { f } else { t }); // 0 => false, !0 => true
                     Self::jump_to_code(&mut self.ops, code, &mut self.opsrecord);
+                }
+                Op::Print => {
+                    let n = self.vstack.pop().ok_or("Print failed")?;
+                    self.vstack.push(n);
+                    println!(">> {}", n);
                 }
             }
             Ok(false)
@@ -367,6 +375,17 @@ fn predef(store: &mut Store<Code, CodeK>, inter: &mut DefaultStringInterner) -> 
     let if_x = store.insert(Code(vec![Op::Cond(if_t, if_f)], Some(if_op_x)));
     let if_idx = store.insert(Code(vec![Op::Take(3), Op::Push(Mode::Label(if_x)), Op::Enter(Mode::Arg(2))], Some(if_op))); // FIXME? it seems to work uwu
 
+    //let print_2 = inter.get_or_intern("__print_2");
+    //let print_idx_2 = store.insert(Code(vec![Op::Print, Op::Return], Some(print_2)));
+
+    let print_1 = inter.get_or_intern("__print_1");
+    //let print_idx_1 = store.insert(Code(vec![Op::Push(Mode::Label(print_idx_2)), Op::Enter(Mode::Arg(1))], Some(print_1)));
+    let print_idx_1 = store.insert(Code(vec![Op::Print, Op::Return], Some(print_1)));
+
+
+    let print = inter.get_or_intern("print");
+    let print_idx = store.insert(Code(vec![Op::Take(1), Op::Push(Mode::Label(print_idx_1)), Op::Enter(Mode::Arg(0))], Some(print)));
+
     macro_rules! def_op {
         ($name:ident, $bop:ident) => {
             {
@@ -393,7 +412,7 @@ fn predef(store: &mut Store<Code, CodeK>, inter: &mut DefaultStringInterner) -> 
         };
     }
 
-    let mut map = def_many!(add, Add, sub, Sub, mul, Mul, div, Div, lt, Lt, lte, Lte, gt, Gt, gte, Gte, eq, Eq, neq, Neq);
+    let mut map = def_many!(add, Add, sub, Sub, mul, Mul, div, Div, lt, Lt, lte, Lte, gt, Gt, gte, Gte, eq, Eq, neq, Neq, modulo, Mod);
     map.insert(empty, empty_idx);
     map.insert(int_op, int_op_idx);
     map.insert(error, error_idx);
@@ -401,6 +420,9 @@ fn predef(store: &mut Store<Code, CodeK>, inter: &mut DefaultStringInterner) -> 
     map.insert(if_op_t, if_t);
     map.insert(if_op_f, if_f);
     map.insert(if_op_x, if_x);
+    map.insert(print, print_idx);
+    map.insert(print_1, print_idx_1);
+    //map.insert(print_2, print_idx_2);
     map
 }
 
